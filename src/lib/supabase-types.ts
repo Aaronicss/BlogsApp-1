@@ -19,6 +19,8 @@ export interface Database {
           created_at: string;
           updated_at: string;
           published_at: string | null;
+          category_id: string | null;
+          tags: string[];
         };
         Insert: {
           id?: string;
@@ -29,6 +31,8 @@ export interface Database {
           created_at?: string;
           updated_at?: string;
           published_at?: string | null;
+          category_id?: string | null;
+          tags?: string[];
         };
         Update: {
           id?: string;
@@ -39,7 +43,14 @@ export interface Database {
           created_at?: string;
           updated_at?: string;
           published_at?: string | null;
+          category_id?: string | null;
+          tags?: string[];
         };
+      };
+      categories: {
+        Row: { id: string; user_id: string; name: string; created_at: string };
+        Insert: { id?: string; user_id?: string; name: string; created_at?: string };
+        Update: { name?: string };
       };
     };
     Views: Record<string, never>;

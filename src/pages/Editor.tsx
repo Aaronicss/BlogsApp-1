@@ -1,7 +1,7 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { useNavigate, useParams, Link } from 'react-router-dom';
-import { ArrowLeft, Save, Send } from 'lucide-react';
-import { supabase, type Post, type PostStatus } from '@/lib/supabase';
+import { ArrowLeft, Save, Send, Plus, Trash2 } from 'lucide-react';
+import { supabase, type Post, type PostStatus, type Category } from '@/lib/supabase';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/context/AuthContext';
 import Layout from '@/components/Layout';
@@ -25,6 +25,10 @@ export default function Editor() {
   const [status, setStatus] = useState<PostStatus>('draft');
   const [loading, setLoading] = useState(!isNew);
   const [saving, setSaving] = useState(false);
+  const [categories, setCategories] = useState<Category[]>([]);
+  const [categoryId, setCategoryId] = useState('none');
+  const [tags, setTags] = useState('');
+  const [newCategory, setNewCategory] = useState('');
 
   // Unique identifier for cover image path — use user id + timestamp for new posts,
   // or the existing post id for edits.
@@ -33,9 +37,28 @@ export default function Editor() {
   );
 
   useEffect(() => {
+    fetchCategories();
     if (isNew) return;
     fetchPost();
   }, [id]);
+
+  const fetchCategories = async () => {
+    const { data } = await supabase.from('categories').select('*').order('name');
+    setCategories((data ?? []) as Category[]);
+  };
+
+  const addCategory = async () => {
+    const name = newCategory.trim(); if (!name) return;
+    const { data, error } = await supabase.from('categories').insert({ name }).select().single();
+    if (error) toast({ title: 'Could not create category', description: error.message, variant: 'destructive' });
+    else { setCategories((prev) => [...prev, data as Category].sort((a,b) => a.name.localeCompare(b.name))); setCategoryId((data as Category).id); setNewCategory(''); }
+  };
+
+  const manageCategory = async (category: Category, remove = false) => {
+    if (remove) { if (!window.confirm(`Delete category “${category.name}”?`)) return; const { error } = await supabase.from('categories').delete().eq('id', category.id); if (error) toast({ title: 'Could not delete category', description: error.message, variant: 'destructive' }); else { setCategories((prev) => prev.filter((c) => c.id !== category.id)); setCategoryId('none'); } return; }
+    const name = window.prompt('Rename category', category.name)?.trim(); if (!name || name === category.name) return;
+    const { error } = await supabase.from('categories').update({ name }).eq('id', category.id); if (error) toast({ title: 'Could not rename category', description: error.message, variant: 'destructive' }); else setCategories((prev) => prev.map((c) => c.id === category.id ? { ...c, name } : c));
+  };
 
   const fetchPost = async () => {
     const { data, error } = await supabase
@@ -61,6 +84,8 @@ export default function Editor() {
     setContent(post.content ?? '');
     setCoverImagePath(post.cover_image_path);
     setStatus(post.status);
+    setCategoryId(post.category_id ?? 'none');
+    setTags((post.tags ?? []).join(', '));
     setCoverIdentifier(post.id);
     setLoading(false);
   };
@@ -84,6 +109,8 @@ export default function Editor() {
           content,
           cover_image_path: coverImagePath,
           status: finalStatus,
+          category_id: categoryId === 'none' ? null : categoryId,
+          tags: tags.split(',').map((tag) => tag.trim()).filter(Boolean),
         })
         .select()
         .single();
@@ -123,6 +150,8 @@ export default function Editor() {
           content,
           cover_image_path: coverImagePath,
           status: finalStatus,
+          category_id: categoryId === 'none' ? null : categoryId,
+          tags: tags.split(',').map((tag) => tag.trim()).filter(Boolean),
         })
         .eq('id', id);
 
@@ -180,6 +209,21 @@ export default function Editor() {
             />
           </div>
 
+          <div className="space-y-2">
+            <Label htmlFor="category">Category</Label>
+            <div className="flex gap-2">
+              <select id="category" value={categoryId} onChange={(e) => setCategoryId(e.target.value)} className="h-9 flex-1 rounded-md border bg-transparent px-3 text-sm">
+                <option value="none">No category</option>
+                {categories.map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}
+              </select>
+              {categoryId !== 'none' && <><Button type="button" variant="outline" size="sm" onClick={() => manageCategory(categories.find((c) => c.id === categoryId)!)}>Rename</Button><Button type="button" variant="outline" size="icon" onClick={() => manageCategory(categories.find((c) => c.id === categoryId)!, true)}><Trash2 className="h-4 w-4" /></Button></>}
+            </div>
+            <div className="flex gap-2"><Input value={newCategory} onChange={(e) => setNewCategory(e.target.value)} placeholder="New category" /><Button type="button" variant="outline" onClick={addCategory}><Plus className="h-4 w-4 mr-1" />Add</Button></div>
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="tags">Tags <span className="text-muted-foreground font-normal">(comma separated)</span></Label>
+            <Input id="tags" value={tags} onChange={(e) => setTags(e.target.value)} placeholder="design, ideas, notes" />
+          </div>
           <div className="space-y-2">
             <Label>Cover Image</Label>
             <CoverImageUpload

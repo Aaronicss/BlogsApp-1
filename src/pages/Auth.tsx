@@ -46,7 +46,7 @@ export default function Auth({ mode }: { mode: Mode }) {
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-background px-4">
-      <div className="w-full max-w-sm space-y-6">
+      <div className="w-full max-w-md space-y-6">
         <div className="text-center space-y-2">
           <div className="inline-flex items-center gap-2 font-semibold">
             <PenLine className="h-6 w-6" />

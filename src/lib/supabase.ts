@@ -22,11 +22,17 @@ export interface Post {
   created_at: string;
   updated_at: string;
   published_at: string | null;
+  category_id: string | null;
+  tags: string[];
 }
+
+export interface Category { id: string; user_id: string; name: string; created_at: string; }
 
 export interface PostInput {
   title: string;
   content: string | null;
   cover_image_path: string | null;
   status: PostStatus;
+  category_id?: string | null;
+  tags?: string[];
 }

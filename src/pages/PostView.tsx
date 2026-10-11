@@ -161,6 +161,7 @@ export default function PostView() {
               </span>
             </div>
             <h1 className="text-3xl font-bold tracking-tight">{post.title}</h1>
+            {post.tags?.length > 0 && <div className="flex flex-wrap gap-2">{post.tags.map((tag) => <Badge key={tag} variant="outline">{tag}</Badge>)}</div>}
           </div>
 
           {post.content ? (

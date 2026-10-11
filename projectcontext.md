@@ -137,8 +137,15 @@ npm run build
 - Protected routes redirecting unauthenticated users to login
 - Responsive UI with clean, modern design
 
+### Categories, tags, and dashboard management
+- Users can create, rename, and delete their own categories. Categories are private and protected by Supabase RLS.
+- Posts have an optional `category_id` and optional comma-separated tags stored as a constrained `text[]`.
+- The editor assigns categories and tags while preserving existing rich text and cover-image behavior.
+- The dashboard filters by category, sorts by newest, oldest, or recently updated, and paginates results with previous/next controls.
+- Category ownership is enforced by RLS and a database trigger that prevents cross-user category assignment.
+
 ### Not Implemented (Intentionally out of MVP scope)
-- Comments, likes, and tags
+- Comments and likes
 - Public post sharing
 - In-content image embedding (only cover images are supported)
 

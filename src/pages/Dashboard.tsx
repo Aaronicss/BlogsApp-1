@@ -1,8 +1,8 @@
 import { useEffect, useState, useMemo } from 'react';
 import { Link } from 'react-router-dom';
-import { FileText, Search, Plus, Pencil, Trash2, Eye } from 'lucide-react';
+import { FileText, Search, Plus, Pencil, Trash2, Eye, ChevronLeft, ChevronRight } from 'lucide-react';
 import { format } from 'date-fns';
-import { supabase, type Post } from '@/lib/supabase';
+import { supabase, type Post, type Category } from '@/lib/supabase';
 import { useAuth } from '@/context/AuthContext';
 import { useToast } from '@/hooks/use-toast';
 import Layout from '@/components/Layout';
@@ -10,6 +10,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent } from '@/components/ui/card';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -24,6 +25,7 @@ import {
 
 interface PostWithCover extends Post {
   coverUrl?: string | null;
+  category?: Category | null;
 }
 
 export default function Dashboard() {
@@ -32,6 +34,11 @@ export default function Dashboard() {
   const [posts, setPosts] = useState<PostWithCover[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
+  const [categories, setCategories] = useState<Category[]>([]);
+  const [categoryFilter, setCategoryFilter] = useState('all');
+  const [sort, setSort] = useState('newest');
+  const [page, setPage] = useState(1);
+  const pageSize = 8;
 
   useEffect(() => {
     fetchPosts();
@@ -39,15 +46,16 @@ export default function Dashboard() {
 
   const fetchPosts = async () => {
     setLoading(true);
-    const { data, error } = await supabase
+    const [{ data, error }, { data: categoryData }] = await Promise.all([supabase
       .from('posts')
-      .select('*')
-      .order('updated_at', { ascending: false });
+      .select('*'), supabase.from('categories').select('*').order('name')]);
+    setCategories((categoryData ?? []) as Category[]);
 
     if (error) {
       toast({ title: 'Failed to load posts', description: error.message, variant: 'destructive' });
     } else {
-      const postsData = data as Post[];
+      const categoryMap = new Map((categoryData ?? []).map((c) => [c.id, c as Category]));
+      const postsData = (data as Post[]).map((p) => ({ ...p, category: p.category_id ? categoryMap.get(p.category_id) ?? null : null }));
 
       // Fetch signed URLs for all cover images in a batch
       const pathsWithCovers = postsData.filter((p) => p.cover_image_path);
@@ -95,10 +103,11 @@ export default function Dashboard() {
   };
 
   const filteredPosts = useMemo(() => {
-    if (!search.trim()) return posts;
     const q = search.toLowerCase();
-    return posts.filter((p) => p.title.toLowerCase().includes(q));
-  }, [posts, search]);
+    return posts.filter((p) => (!q || p.title.toLowerCase().includes(q)) && (categoryFilter === 'all' || p.category_id === categoryFilter)).sort((a,b) => sort === 'oldest' ? +new Date(a.created_at) - +new Date(b.created_at) : sort === 'updated' ? +new Date(b.updated_at) - +new Date(a.updated_at) : +new Date(b.created_at) - +new Date(a.created_at));
+  }, [posts, search, categoryFilter, sort]);
+  const pageCount = Math.max(1, Math.ceil(filteredPosts.length / pageSize));
+  const visiblePosts = filteredPosts.slice((page - 1) * pageSize, page * pageSize);
 
   const draftCount = posts.filter((p) => p.status === 'draft').length;
   const publishedCount = posts.filter((p) => p.status === 'published').length;
@@ -121,6 +130,7 @@ export default function Dashboard() {
           </Button>
         </div>
 
+        <div className="grid gap-2 sm:grid-cols-[1fr_180px_180px]">
         <div className="relative">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input
@@ -129,6 +139,9 @@ export default function Dashboard() {
             onChange={(e) => setSearch(e.target.value)}
             className="pl-10"
           />
+        </div>
+        <Select value={categoryFilter} onValueChange={(value) => { setCategoryFilter(value); setPage(1); }}><SelectTrigger><SelectValue placeholder="Category" /></SelectTrigger><SelectContent><SelectItem value="all">All categories</SelectItem>{categories.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}</SelectContent></Select>
+        <Select value={sort} onValueChange={(value) => { setSort(value); setPage(1); }}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="newest">Newest</SelectItem><SelectItem value="oldest">Oldest</SelectItem><SelectItem value="updated">Recently updated</SelectItem></SelectContent></Select>
         </div>
 
         {loading ? (
@@ -154,7 +167,7 @@ export default function Dashboard() {
           </Card>
         ) : (
           <div className="space-y-3">
-            {filteredPosts.map((post) => (
+            {visiblePosts.map((post) => (
               <Card key={post.id} className="hover:border-foreground/20 transition-colors overflow-hidden">
                 <CardContent className="p-0">
                   <div className="flex items-stretch gap-0">
@@ -177,6 +190,7 @@ export default function Dashboard() {
                             <span className="text-xs text-muted-foreground">
                               {format(new Date(post.updated_at), 'MMM d, yyyy')}
                             </span>
+                            {post.category && <Badge variant="outline">{post.category.name}</Badge>}
                           </div>
                           <Link to={`/posts/${post.id}`} className="block">
                             <h3 className="font-semibold text-foreground hover:underline truncate">
@@ -233,6 +247,8 @@ export default function Dashboard() {
             ))}
           </div>
         )}
+
+        {pageCount > 1 && <div className="flex items-center justify-center gap-3"><Button variant="outline" size="sm" disabled={page === 1} onClick={() => setPage((p) => p - 1)}><ChevronLeft className="h-4 w-4 mr-1" />Previous</Button><span className="text-sm text-muted-foreground">Page {page} of {pageCount}</span><Button variant="outline" size="sm" disabled={page === pageCount} onClick={() => setPage((p) => p + 1)}>Next<ChevronRight className="h-4 w-4 ml-1" /></Button></div>}
 
         {user && (
           <p className="text-xs text-muted-foreground text-center pt-4">
