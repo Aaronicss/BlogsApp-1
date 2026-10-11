@@ -3,24 +3,34 @@ import { useNavigate, useParams, Link } from 'react-router-dom';
 import { ArrowLeft, Save, Send } from 'lucide-react';
 import { supabase, type Post, type PostStatus } from '@/lib/supabase';
 import { useToast } from '@/hooks/use-toast';
+import { useAuth } from '@/context/AuthContext';
 import Layout from '@/components/Layout';
+import RichTextEditor from '@/components/RichTextEditor';
+import CoverImageUpload from '@/components/CoverImageUpload';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
 
 export default function Editor() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { toast } = useToast();
+  const { user } = useAuth();
   const isNew = id === 'new';
 
   const [title, setTitle] = useState('');
   const [content, setContent] = useState('');
+  const [coverImagePath, setCoverImagePath] = useState<string | null>(null);
   const [status, setStatus] = useState<PostStatus>('draft');
   const [loading, setLoading] = useState(!isNew);
   const [saving, setSaving] = useState(false);
+
+  // Unique identifier for cover image path — use user id + timestamp for new posts,
+  // or the existing post id for edits.
+  const [coverIdentifier, setCoverIdentifier] = useState(
+    isNew ? `new-${Date.now()}` : (id ?? 'unknown')
+  );
 
   useEffect(() => {
     if (isNew) return;
@@ -49,7 +59,9 @@ export default function Editor() {
     const post = data as Post;
     setTitle(post.title);
     setContent(post.content ?? '');
+    setCoverImagePath(post.cover_image_path);
     setStatus(post.status);
+    setCoverIdentifier(post.id);
     setLoading(false);
   };
 
@@ -67,7 +79,12 @@ export default function Editor() {
     if (isNew) {
       const { data, error } = await supabase
         .from('posts')
-        .insert({ title: title.trim(), content, status: finalStatus })
+        .insert({
+          title: title.trim(),
+          content,
+          cover_image_path: coverImagePath,
+          status: finalStatus,
+        })
         .select()
         .single();
 
@@ -77,12 +94,36 @@ export default function Editor() {
         return;
       }
 
+      const savedPost = data as Post;
+
+      // If a cover image was uploaded with a temporary identifier, rename it to the post id
+      if (coverImagePath && user) {
+        const newPath = `${user.id}/${savedPost.id}.${coverImagePath.split('.').pop()}`;
+        if (newPath !== coverImagePath) {
+          const { error: moveError } = await supabase.storage
+            .from('post-covers')
+            .move(coverImagePath, newPath);
+
+          if (!moveError) {
+            await supabase
+              .from('posts')
+              .update({ cover_image_path: newPath })
+              .eq('id', savedPost.id);
+          }
+        }
+      }
+
       toast({ title: finalStatus === 'published' ? 'Post published' : 'Draft saved' });
-      navigate(`/posts/${(data as Post).id}`);
+      navigate(`/posts/${savedPost.id}`);
     } else {
       const { error } = await supabase
         .from('posts')
-        .update({ title: title.trim(), content, status: finalStatus })
+        .update({
+          title: title.trim(),
+          content,
+          cover_image_path: coverImagePath,
+          status: finalStatus,
+        })
         .eq('id', id);
 
       if (error) {
@@ -123,7 +164,7 @@ export default function Editor() {
         <form
           onSubmit={(e: FormEvent) => {
             e.preventDefault();
-            save();
+            save('published');
           }}
           className="space-y-6"
         >
@@ -140,17 +181,17 @@ export default function Editor() {
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="content">Content</Label>
-            <Textarea
-              id="content"
-              value={content}
-              onChange={(e) => setContent(e.target.value)}
-              placeholder="Start writing..."
-              className="min-h-[400px] resize-y font-mono text-sm leading-relaxed"
+            <Label>Cover Image</Label>
+            <CoverImageUpload
+              coverImagePath={coverImagePath}
+              onPathChange={setCoverImagePath}
+              postIdentifier={coverIdentifier}
             />
-            <p className="text-xs text-muted-foreground">
-              Supports plain text. You can use basic HTML for formatting (bold, italics, headings, links).
-            </p>
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="content">Content</Label>
+            <RichTextEditor content={content} onChange={setContent} />
           </div>
 
           <div className="flex flex-col-reverse sm:flex-row sm:justify-end gap-2">
@@ -165,7 +206,6 @@ export default function Editor() {
             </Button>
             <Button
               type="submit"
-              onClick={() => save('published')}
               disabled={saving}
             >
               <Send className="h-4 w-4 mr-1" />

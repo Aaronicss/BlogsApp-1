@@ -22,10 +22,14 @@ import {
   AlertDialogTrigger,
 } from '@/components/ui/alert-dialog';
 
+interface PostWithCover extends Post {
+  coverUrl?: string | null;
+}
+
 export default function Dashboard() {
   const { user } = useAuth();
   const { toast } = useToast();
-  const [posts, setPosts] = useState<Post[]>([]);
+  const [posts, setPosts] = useState<PostWithCover[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
 
@@ -43,12 +47,44 @@ export default function Dashboard() {
     if (error) {
       toast({ title: 'Failed to load posts', description: error.message, variant: 'destructive' });
     } else {
-      setPosts(data as Post[]);
+      const postsData = data as Post[];
+
+      // Fetch signed URLs for all cover images in a batch
+      const pathsWithCovers = postsData.filter((p) => p.cover_image_path);
+      if (pathsWithCovers.length > 0) {
+        const { data: urlsData, error: urlsError } = await supabase.storage
+          .from('post-covers')
+          .createSignedUrls(
+            pathsWithCovers.map((p) => p.cover_image_path as string),
+            3600
+          );
+
+        if (!urlsError && urlsData) {
+          const urlMap = new Map<string, string>();
+          for (const item of urlsData) {
+            if (item.path && item.signedUrl) {
+              urlMap.set(item.path, item.signedUrl);
+            }
+          }
+          const enriched = postsData.map((p) => ({
+            ...p,
+            coverUrl: p.cover_image_path ? (urlMap.get(p.cover_image_path) ?? null) : null,
+          }));
+          setPosts(enriched);
+          setLoading(false);
+          return;
+        }
+      }
+
+      setPosts(postsData);
     }
     setLoading(false);
   };
 
-  const handleDelete = async (id: string) => {
+  const handleDelete = async (id: string, coverPath: string | null) => {
+    if (coverPath) {
+      await supabase.storage.from('post-covers').remove([coverPath]);
+    }
     const { error } = await supabase.from('posts').delete().eq('id', id);
     if (error) {
       toast({ title: 'Delete failed', description: error.message, variant: 'destructive' });
@@ -119,64 +155,77 @@ export default function Dashboard() {
         ) : (
           <div className="space-y-3">
             {filteredPosts.map((post) => (
-              <Card key={post.id} className="hover:border-foreground/20 transition-colors">
-                <CardContent className="p-4 sm:p-5">
-                  <div className="flex items-start justify-between gap-4">
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-2 mb-1">
-                        <Badge variant={post.status === 'published' ? 'default' : 'secondary'}>
-                          {post.status}
-                        </Badge>
-                        <span className="text-xs text-muted-foreground">
-                          {format(new Date(post.updated_at), 'MMM d, yyyy')}
-                        </span>
-                      </div>
-                      <Link to={`/posts/${post.id}`} className="block">
-                        <h3 className="font-semibold text-foreground hover:underline truncate">
-                          {post.title}
-                        </h3>
+              <Card key={post.id} className="hover:border-foreground/20 transition-colors overflow-hidden">
+                <CardContent className="p-0">
+                  <div className="flex items-stretch gap-0">
+                    {post.coverUrl && (
+                      <Link to={`/posts/${post.id}`} className="shrink-0 hidden sm:block">
+                        <img
+                          src={post.coverUrl}
+                          alt={post.title}
+                          className="w-24 h-full object-cover"
+                        />
                       </Link>
-                      {post.content && (
-                        <p className="text-sm text-muted-foreground mt-1 line-clamp-2">
-                          {post.content.replace(/<[^>]*>/g, '').slice(0, 150)}
-                        </p>
-                      )}
-                    </div>
-                    <div className="flex items-center gap-1 shrink-0">
-                      <Button variant="ghost" size="icon" asChild title="View">
-                        <Link to={`/posts/${post.id}`}>
-                          <Eye className="h-4 w-4" />
-                        </Link>
-                      </Button>
-                      <Button variant="ghost" size="icon" asChild title="Edit">
-                        <Link to={`/editor/${post.id}`}>
-                          <Pencil className="h-4 w-4" />
-                        </Link>
-                      </Button>
-                      <AlertDialog>
-                        <AlertDialogTrigger asChild>
-                          <Button variant="ghost" size="icon" title="Delete" className="text-destructive hover:text-destructive">
-                            <Trash2 className="h-4 w-4" />
+                    )}
+                    <div className="flex-1 p-4 sm:p-5">
+                      <div className="flex items-start justify-between gap-4">
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-2 mb-1">
+                            <Badge variant={post.status === 'published' ? 'default' : 'secondary'}>
+                              {post.status}
+                            </Badge>
+                            <span className="text-xs text-muted-foreground">
+                              {format(new Date(post.updated_at), 'MMM d, yyyy')}
+                            </span>
+                          </div>
+                          <Link to={`/posts/${post.id}`} className="block">
+                            <h3 className="font-semibold text-foreground hover:underline truncate">
+                              {post.title}
+                            </h3>
+                          </Link>
+                          {post.content && (
+                            <p className="text-sm text-muted-foreground mt-1 line-clamp-2">
+                              {post.content.replace(/<[^>]*>/g, '').slice(0, 150)}
+                            </p>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-1 shrink-0">
+                          <Button variant="ghost" size="icon" asChild title="View">
+                            <Link to={`/posts/${post.id}`}>
+                              <Eye className="h-4 w-4" />
+                            </Link>
                           </Button>
-                        </AlertDialogTrigger>
-                        <AlertDialogContent>
-                          <AlertDialogHeader>
-                            <AlertDialogTitle>Delete this post?</AlertDialogTitle>
-                            <AlertDialogDescription>
-                              &quot;{post.title}&quot; will be permanently deleted. This action cannot be undone.
-                            </AlertDialogDescription>
-                          </AlertDialogHeader>
-                          <AlertDialogFooter>
-                            <AlertDialogCancel>Cancel</AlertDialogCancel>
-                            <AlertDialogAction
-                              onClick={() => handleDelete(post.id)}
-                              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-                            >
-                              Delete
-                            </AlertDialogAction>
-                          </AlertDialogFooter>
-                        </AlertDialogContent>
-                      </AlertDialog>
+                          <Button variant="ghost" size="icon" asChild title="Edit">
+                            <Link to={`/editor/${post.id}`}>
+                              <Pencil className="h-4 w-4" />
+                            </Link>
+                          </Button>
+                          <AlertDialog>
+                            <AlertDialogTrigger asChild>
+                              <Button variant="ghost" size="icon" title="Delete" className="text-destructive hover:text-destructive">
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            </AlertDialogTrigger>
+                            <AlertDialogContent>
+                              <AlertDialogHeader>
+                                <AlertDialogTitle>Delete this post?</AlertDialogTitle>
+                                <AlertDialogDescription>
+                                  &quot;{post.title}&quot; will be permanently deleted. This action cannot be undone.
+                                </AlertDialogDescription>
+                              </AlertDialogHeader>
+                              <AlertDialogFooter>
+                                <AlertDialogCancel>Cancel</AlertDialogCancel>
+                                <AlertDialogAction
+                                  onClick={() => handleDelete(post.id, post.cover_image_path)}
+                                  className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                                >
+                                  Delete
+                                </AlertDialogAction>
+                              </AlertDialogFooter>
+                            </AlertDialogContent>
+                          </AlertDialog>
+                        </div>
+                      </div>
                     </div>
                   </div>
                 </CardContent>

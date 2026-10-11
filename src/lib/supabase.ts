@@ -17,6 +17,7 @@ export interface Post {
   user_id: string;
   title: string;
   content: string | null;
+  cover_image_path: string | null;
   status: PostStatus;
   created_at: string;
   updated_at: string;
@@ -26,5 +27,6 @@ export interface Post {
 export interface PostInput {
   title: string;
   content: string | null;
+  cover_image_path: string | null;
   status: PostStatus;
 }

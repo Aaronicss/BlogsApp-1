@@ -8,6 +8,7 @@ Inkspace is a minimal, modern private blogging application where every user can 
 - **Styling:** Tailwind CSS + shadcn/ui
 - **Backend:** Supabase (PostgreSQL, Authentication, Storage)
 - **Routing:** React Router
+- **Rich-Text Editor:** Tiptap (@tiptap/react, @tiptap/starter-kit, @tiptap/extension-link)
 - **Icons:** Lucide React
 
 ## Database Schema
@@ -18,7 +19,8 @@ Inkspace is a minimal, modern private blogging application where every user can 
 | `id` | uuid (PK) | Auto-generated unique identifier |
 | `user_id` | uuid (FK → auth.users) | Owner of the post, defaults to `auth.uid()` |
 | `title` | text | Post title (required) |
-| `content` | text | Rich-text/HTML content (nullable) |
+| `content` | text | Rich-text HTML content from Tiptap editor (nullable) |
+| `cover_image_path` | text | Storage path to cover image in `post-covers` bucket (nullable) |
 | `status` | text | `draft` or `published` (CHECK constraint, default `draft`) |
 | `created_at` | timestamptz | Creation timestamp (default `now()`) |
 | `updated_at` | timestamptz | Last update timestamp (auto-updated via trigger) |
@@ -31,22 +33,37 @@ Inkspace is a minimal, modern private blogging application where every user can 
 ### Trigger
 - `update_posts_updated_at` — automatically updates `updated_at` on row change and sets `published_at` when a post first transitions to published status.
 
+### Storage: `post-covers` bucket
+- A **private** Supabase Storage bucket for cover image uploads.
+- Files are stored under `{user_id}/` path prefixes.
+- **RLS policies** on `storage.objects` enforce that authenticated users can only SELECT, INSERT, UPDATE, and DELETE files in their own `user_id` folder.
+- Images are never publicly accessible — the app generates **signed URLs** (1-hour expiry) per session to display cover images.
+- No anon access to the bucket.
+
 ## Privacy & Security
 - **Row Level Security (RLS)** is enabled on the `posts` table.
 - All policies are scoped to `TO authenticated` — anon access is not allowed.
 - **SELECT, INSERT, UPDATE, DELETE** each have separate owner-scoped policies using `auth.uid() = user_id`.
 - `user_id` defaults to `auth.uid()` so frontend inserts work without explicitly passing the owner.
 - Published posts remain private — there is no public read policy.
-- Authorization is enforced at the database level, not just the frontend.
+- Cover images in the `post-covers` storage bucket are protected by storage RLS policies scoped to each user's folder. Users can only access their own images.
+- Authorization is enforced at the database and storage level, not just the frontend.
 
 ## Features
 - Email and password registration/login via Supabase Auth
-- Dashboard showing the logged-in user's posts with counts (total, published, drafts)
-- Create new posts with title and content
+- Dashboard showing the logged-in user's posts with counts (total, published, drafts) and cover image thumbnails
+- Create new posts with title and rich-text content
+- **Tiptap rich-text editor** with toolbar: headings (H1, H2, H3), bold, italic, bullet lists, numbered lists, blockquotes, links, undo/redo
+- **Cover image uploads** to a private Supabase Storage bucket with:
+  - Drag-and-drop file picker with preview
+  - Upload validation: image type (JPEG, PNG, WebP, GIF) and size (max 5MB)
+  - Clear error messages for invalid uploads
+  - Image removal with storage cleanup
+  - Signed URL generation for private image display
 - Save drafts or publish posts
-- Edit existing posts (change title, content, status)
-- View individual posts
-- Delete posts with confirmation dialog
+- Edit existing posts (change title, content, cover image, status)
+- View individual posts with cover image and formatted rich-text content
+- Delete posts (and their cover images) with confirmation dialog
 - Search posts by title
 - Responsive, clean UI
 
@@ -59,6 +76,8 @@ src/
 ├── components/
 │   ├── Layout.tsx               # App header and shell
 │   ├── ProtectedRoute.tsx       # Redirects unauthenticated users to /login
+│   ├── RichTextEditor.tsx       # Tiptap editor with formatting toolbar
+│   ├── CoverImageUpload.tsx     # Cover image upload with validation and preview
 │   └── ui/                      # shadcn/ui components
 ├── pages/
 │   ├── Auth.tsx                 # Login and signup screen
@@ -85,7 +104,7 @@ VITE_SUPABASE_ANON_KEY=your-supabase-anon-key
 Copy `.env.example` to `.env` and fill in your Supabase project URL and anon key. In the Bolt environment, these are pre-populated automatically.
 
 ### Database
-The `posts` table migration and RLS policies are applied automatically via the Supabase MCP migration tool. No manual SQL setup is needed.
+The `posts` table migration, RLS policies, and the `post-covers` storage bucket with its storage policies are applied automatically via the Supabase MCP migration tool. No manual SQL setup is needed.
 
 ## How to Run
 The dev server runs automatically in the Bolt environment. For local development:
@@ -107,19 +126,21 @@ npm run build
 - Email/password authentication (signup, login, logout) via Supabase Auth
 - Post CRUD: create, read, update, delete — all backed by real Supabase database operations
 - Draft and publish status with automatic `published_at` timestamping
-- Dashboard with post list, search by title, and post counts
-- Post editor with save-as-draft and publish actions
-- Post view page with formatted content display
-- Delete confirmation dialogs
+- Dashboard with post list, search by title, post counts, and cover image thumbnails
+- Post editor with Tiptap rich-text editor (headings, bold, italic, lists, links, blockquotes, undo/redo)
+- Cover image upload to private Supabase Storage bucket with validation (type, size), preview, and removal
+- Cover images saved to database and restored when editing — saved formatting and images persist across save/reopen cycles
+- Post view page with cover image display and formatted rich-text content
+- Delete confirmation dialogs (also removes cover image from storage)
 - Row Level Security enforcing per-user data isolation at the database level
+- Storage RLS policies enforcing per-user image isolation in the `post-covers` bucket
 - Protected routes redirecting unauthenticated users to login
 - Responsive UI with clean, modern design
 
 ### Not Implemented (Intentionally out of MVP scope)
 - Comments, likes, and tags
-- Image uploads
-- Rich-text WYSIWYG editor (content supports plain text and basic HTML)
 - Public post sharing
+- In-content image embedding (only cover images are supported)
 
 ### Configuration Notes
 - Supabase URL and anon key are pre-populated in the Bolt environment
