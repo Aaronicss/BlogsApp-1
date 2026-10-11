@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { useNavigate, useParams, Link } from 'react-router-dom';
 import { ArrowLeft, Pencil, Trash2, Calendar } from 'lucide-react';
 import { format } from 'date-fns';
@@ -26,10 +26,23 @@ export default function PostView() {
   const { toast } = useToast();
   const [post, setPost] = useState<Post | null>(null);
   const [loading, setLoading] = useState(true);
+  const [coverUrl, setCoverUrl] = useState<string | null>(null);
 
   useEffect(() => {
     fetchPost();
   }, [id]);
+
+  const fetchCoverUrl = useCallback(async (path: string) => {
+    const { data, error } = await supabase.storage
+      .from('post-covers')
+      .createSignedUrl(path, 3600);
+
+    if (error || !data?.signedUrl) {
+      setCoverUrl(null);
+      return;
+    }
+    setCoverUrl(data.signedUrl);
+  }, []);
 
   const fetchPost = async () => {
     const { data, error } = await supabase
@@ -44,11 +57,18 @@ export default function PostView() {
       return;
     }
 
-    setPost(data as Post);
+    const fetchedPost = data as Post;
+    setPost(fetchedPost);
+    if (fetchedPost.cover_image_path) {
+      fetchCoverUrl(fetchedPost.cover_image_path);
+    }
     setLoading(false);
   };
 
   const handleDelete = async () => {
+    if (post?.cover_image_path) {
+      await supabase.storage.from('post-covers').remove([post.cover_image_path]);
+    }
     const { error } = await supabase.from('posts').delete().eq('id', id);
     if (error) {
       toast({ title: 'Delete failed', description: error.message, variant: 'destructive' });
@@ -114,6 +134,16 @@ export default function PostView() {
         </div>
 
         <article className="space-y-6">
+          {coverUrl && (
+            <div className="rounded-lg overflow-hidden border">
+              <img
+                src={coverUrl}
+                alt={post.title}
+                className="w-full max-h-96 object-cover"
+              />
+            </div>
+          )}
+
           <div className="space-y-3">
             <div className="flex items-center gap-2 flex-wrap">
               <Badge variant={post.status === 'published' ? 'default' : 'secondary'}>
